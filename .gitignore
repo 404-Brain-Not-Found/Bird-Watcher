@@ -1,3 +1,5 @@
 venv
 bird_classifier
 temp
+.idea
+__pycache__
