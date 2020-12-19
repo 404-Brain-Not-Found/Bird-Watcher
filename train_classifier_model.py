@@ -29,6 +29,7 @@ if __name__ == "__main__":
     #     brightness_range=(0.2, 1.8)
     # )
 
+
     batch_size = 255
     image_size = (224, 224)
 

@@ -45,11 +45,11 @@ def rcnn_detection(image, min_conf=0.9, overlap_threshold=0.3):
             if max_index < len(labels) and min_conf <= output[max_index]:
                 found.append({
                     "label": labels[max_index],
-                    "confidence": output[max_index],
-                    "xmin": x,
-                    "ymin": y,
-                    "xmax": x + w,
-                    "ymax": y + h
+                    "confidence": float(output[max_index]),
+                    "xmin": int(x),
+                    "ymin": int(y),
+                    "xmax": int(x + w),
+                    "ymax": int(y + h)
                 })
         else:
             break
