@@ -103,8 +103,8 @@ def build_yolo_loss(n_classes=20, n_boxes=2, grid_w=7, grid_h=7):
         predict_trust = y_pred[..., n_classes:n_classes + 2]  # ? * 7 * 7 * 2
         predict_box = y_pred[..., n_classes + 2:]  # ? * 7 * 7 * 8
 
-        _label_box = K.reshape(label_box, [-1, 7, 7, 1, 4])
-        _predict_box = K.reshape(predict_box, [-1, 7, 7, 2, 4])
+        _label_box = K.reshape(label_box, [-1, grid_h, grid_w, 1, 4])
+        _predict_box = K.reshape(predict_box, [-1, grid_h, grid_w, n_boxes, 4])
 
         label_xy, label_wh = yolo_head(_label_box)  # ? * 7 * 7 * 1 * 2, ? * 7 * 7 * 1 * 2
         label_xy = K.expand_dims(label_xy, 3)  # ? * 7 * 7 * 1 * 1 * 2
