@@ -1,47 +1,6 @@
-from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Layer
+import numpy as np
+from tensorflow.keras import backend as k
 
-
-class YoloReshape(Layer):
-
-    def __init__(self, target_shape, n_classes, n_boxes=2, **kwargs):
-        super(YoloReshape, self).__init__(name="YoloReshape")
-        self.target_shape = tuple(target_shape)
-        self.n_classes = n_classes
-        self.n_boxes = n_boxes
-        super(YoloReshape, self).__init__(**kwargs)
-
-        print(target_shape)
-
-    def get_config(self):
-        config = super(YoloReshape, self).get_config().copy()
-        config.update({
-            'target_shape': self.target_shape,
-            'n_classes': self.n_classes,
-            'n_boxes': self.n_boxes,
-            })
-        return config
-
-    def call(self, inputs):
-        S = [self.target_shape[0], self.target_shape[1]]
-        C = self.n_classes
-        B = self.n_boxes
-
-        idx_1 = S[0] * S[1] * C
-        idx_2 = idx_1 + S[0] * S[1] * B
-
-        class_probs = K.reshape(inputs[:, :idx_1], (K.shape(inputs)[0], ) + tuple([S[0], S[1], C]))
-        class_probs = K.softmax(class_probs)
-
-        confs = K.reshape(inputs[:, idx_1:idx_2], (K.shape(inputs)[0],) + tuple([S[0], S[1], B]))
-        confs = K.sigmoid(confs)
-
-        boxes = K.reshape(inputs[:, idx_2:], (K.shape(inputs)[0],) + tuple([S[0], S[1], B * 4]))
-        boxes = K.sigmoid(boxes)
-
-        outputs = K.concatenate([class_probs, confs, boxes])
-
-        return outputs
 
 def xywh2minmax(xy, wh):
     xy_min = xy - wh / 2
@@ -51,9 +10,9 @@ def xywh2minmax(xy, wh):
 
 
 def iou(pred_mins, pred_maxes, true_mins, true_maxes):
-    intersect_mins = K.maximum(pred_mins, true_mins)
-    intersect_maxes = K.minimum(pred_maxes, true_maxes)
-    intersect_wh = K.maximum(intersect_maxes - intersect_mins, 0.)
+    intersect_mins = k.maximum(pred_mins, true_mins)
+    intersect_maxes = k.minimum(pred_maxes, true_maxes)
+    intersect_wh = k.maximum(intersect_maxes - intersect_mins, 0.)
     intersect_areas = intersect_wh[..., 0] * intersect_wh[..., 1]
 
     pred_wh = pred_maxes - pred_mins
@@ -69,22 +28,22 @@ def iou(pred_mins, pred_maxes, true_mins, true_maxes):
 
 def yolo_head(feats):
     # Dynamic implementation of conv dims for fully convolutional model.
-    conv_dims = K.shape(feats)[1:3]  # assuming channels last
+    conv_dims = k.shape(feats)[1:3]  # assuming channels last
     # In YOLO the height index is the inner most iteration.
-    conv_height_index = K.arange(0, stop=conv_dims[0])
-    conv_width_index = K.arange(0, stop=conv_dims[1])
-    conv_height_index = K.tile(conv_height_index, [conv_dims[1]])
+    conv_height_index = k.arange(0, stop=conv_dims[0])
+    conv_width_index = k.arange(0, stop=conv_dims[1])
+    conv_height_index = k.tile(conv_height_index, [conv_dims[1]])
 
     # TODO: Repeat_elements and tf.split doesn't support dynamic splits.
     # conv_width_index = K.repeat_elements(conv_width_index, conv_dims[1], axis=0)
-    conv_width_index = K.tile(
-        K.expand_dims(conv_width_index, 0), [conv_dims[0], 1])
-    conv_width_index = K.flatten(K.transpose(conv_width_index))
-    conv_index = K.transpose(K.stack([conv_height_index, conv_width_index]))
-    conv_index = K.reshape(conv_index, [1, conv_dims[0], conv_dims[1], 1, 2])
-    conv_index = K.cast(conv_index, K.dtype(feats))
+    conv_width_index = k.tile(
+        k.expand_dims(conv_width_index, 0), [conv_dims[0], 1])
+    conv_width_index = k.flatten(k.transpose(conv_width_index))
+    conv_index = k.transpose(k.stack([conv_height_index, conv_width_index]))
+    conv_index = k.reshape(conv_index, [1, conv_dims[0], conv_dims[1], 1, 2])
+    conv_index = k.cast(conv_index, k.dtype(feats))
 
-    conv_dims = K.cast(K.reshape(conv_dims, [1, 1, 1, 1, 2]), K.dtype(feats))
+    conv_dims = k.cast(k.reshape(conv_dims, [1, 1, 1, 1, 2]), k.dtype(feats))
 
     box_xy = (feats[..., :2] + conv_index) / conv_dims * 448
     box_wh = feats[..., 2:4] * 448
@@ -97,55 +56,90 @@ def build_yolo_loss(n_classes=20, n_boxes=2, grid_w=7, grid_h=7):
         label_class = y_true[..., :n_classes]  # ? * 7 * 7 * 20
         label_box = y_true[..., n_classes:n_classes + 4]  # ? * 7 * 7 * 4
         response_mask = y_true[..., n_classes + 4]  # ? * 7 * 7
-        response_mask = K.expand_dims(response_mask)  # ? * 7 * 7 * 1
+        response_mask = k.expand_dims(response_mask)  # ? * 7 * 7 * 1
 
         predict_class = y_pred[..., :n_classes]  # ? * 7 * 7 * 20
         predict_trust = y_pred[..., n_classes:n_classes + 2]  # ? * 7 * 7 * 2
         predict_box = y_pred[..., n_classes + 2:]  # ? * 7 * 7 * 8
 
-        _label_box = K.reshape(label_box, [-1, grid_h, grid_w, 1, 4])
-        _predict_box = K.reshape(predict_box, [-1, grid_h, grid_w, n_boxes, 4])
+        _label_box = k.reshape(label_box, [-1, grid_h, grid_w, 1, 4])
+        _predict_box = k.reshape(predict_box, [-1, grid_h, grid_w, n_boxes, 4])
 
         label_xy, label_wh = yolo_head(_label_box)  # ? * 7 * 7 * 1 * 2, ? * 7 * 7 * 1 * 2
-        label_xy = K.expand_dims(label_xy, 3)  # ? * 7 * 7 * 1 * 1 * 2
-        label_wh = K.expand_dims(label_wh, 3)  # ? * 7 * 7 * 1 * 1 * 2
+        label_xy = k.expand_dims(label_xy, 3)  # ? * 7 * 7 * 1 * 1 * 2
+        label_wh = k.expand_dims(label_wh, 3)  # ? * 7 * 7 * 1 * 1 * 2
         label_xy_min, label_xy_max = xywh2minmax(label_xy, label_wh)  # ? * 7 * 7 * 1 * 1 * 2, ? * 7 * 7 * 1 * 1 * 2
 
         predict_xy, predict_wh = yolo_head(_predict_box)  # ? * 7 * 7 * 2 * 2, ? * 7 * 7 * 2 * 2
-        predict_xy = K.expand_dims(predict_xy, 4)  # ? * 7 * 7 * 2 * 1 * 2
-        predict_wh = K.expand_dims(predict_wh, 4)  # ? * 7 * 7 * 2 * 1 * 2
+        predict_xy = k.expand_dims(predict_xy, 4)  # ? * 7 * 7 * 2 * 1 * 2
+        predict_wh = k.expand_dims(predict_wh, 4)  # ? * 7 * 7 * 2 * 1 * 2
         predict_xy_min, predict_xy_max = xywh2minmax(predict_xy,
                                                      predict_wh)  # ? * 7 * 7 * 2 * 1 * 2, ? * 7 * 7 * 2 * 1 * 2
 
         iou_scores = iou(predict_xy_min, predict_xy_max, label_xy_min, label_xy_max)  # ? * 7 * 7 * 2 * 1
-        best_ious = K.max(iou_scores, axis=4)  # ? * 7 * 7 * 2
-        best_box = K.max(best_ious, axis=3, keepdims=True)  # ? * 7 * 7 * 1
+        best_ious = k.max(iou_scores, axis=4)  # ? * 7 * 7 * 2
+        best_box = k.max(best_ious, axis=3, keepdims=True)  # ? * 7 * 7 * 1
 
-        box_mask = K.cast(best_ious >= best_box, K.dtype(best_ious))  # ? * 7 * 7 * 2
+        box_mask = k.cast(best_ious >= best_box, k.dtype(best_ious))  # ? * 7 * 7 * 2
 
-        no_object_loss = 0.5 * (1 - box_mask * response_mask) * K.square(0 - predict_trust)
-        object_loss = box_mask * response_mask * K.square(1 - predict_trust)
+        no_object_loss = 0.5 * (1 - box_mask * response_mask) * k.square(0 - predict_trust)
+        object_loss = box_mask * response_mask * k.square(1 - predict_trust)
         confidence_loss = no_object_loss + object_loss
-        confidence_loss = K.sum(confidence_loss)
+        confidence_loss = k.sum(confidence_loss)
 
-        class_loss = response_mask * K.square(label_class - predict_class)
-        class_loss = K.sum(class_loss)
+        class_loss = response_mask * k.square(label_class - predict_class)
+        class_loss = k.sum(class_loss)
 
-        _label_box = K.reshape(label_box, [-1, 7, 7, 1, 4])
-        _predict_box = K.reshape(predict_box, [-1, 7, 7, 2, 4])
+        _label_box = k.reshape(label_box, [-1, 7, 7, 1, 4])
+        _predict_box = k.reshape(predict_box, [-1, 7, 7, 2, 4])
 
         label_xy, label_wh = yolo_head(_label_box)  # ? * 7 * 7 * 1 * 2, ? * 7 * 7 * 1 * 2
         predict_xy, predict_wh = yolo_head(_predict_box)  # ? * 7 * 7 * 2 * 2, ? * 7 * 7 * 2 * 2
 
-        box_mask = K.expand_dims(box_mask)
-        response_mask = K.expand_dims(response_mask)
+        box_mask = k.expand_dims(box_mask)
+        response_mask = k.expand_dims(response_mask)
 
-        box_loss = 5 * box_mask * response_mask * K.square((label_xy - predict_xy) / 448)
-        box_loss += 5 * box_mask * response_mask * K.square((K.sqrt(label_wh) - K.sqrt(predict_wh)) / 448)
-        box_loss = K.sum(box_loss)
+        box_loss = 5 * box_mask * response_mask * k.square((label_xy - predict_xy) / 448)
+        box_loss += 5 * box_mask * response_mask * k.square((k.sqrt(label_wh) - k.sqrt(predict_wh)) / 448)
+        box_loss = k.sum(box_loss)
 
         loss = confidence_loss + class_loss + box_loss
 
         return loss
 
     return yolo_loss
+
+
+def decode_yolo_output(image, output, labels, n_boxes=2, box_conf_threshold=0.5):
+    decoded = []
+
+    grid_h, grid_w = output.shape[:2]
+
+    img_h, img_w = image.shape[:2]
+
+    for row in range(grid_h):
+        for col in range(grid_w):
+            class_matrix = output[row][col][:len(labels)]
+            boxes_matrix = output[row][col][len(labels):]
+
+            label_index = int(np.argmax(class_matrix))
+
+            info = {'label': labels[label_index], "label_conf": class_matrix[label_index]}
+            for b in range(n_boxes):
+                cen_x, cen_y, width, height, conf = boxes_matrix[b * 5: (b + 1) * 5]
+
+                if box_conf_threshold <= conf:
+                    width *= img_w
+                    height *= img_h
+
+                    x = ((cen_x + col) / grid_w) * img_w
+                    y = ((cen_y + row) / grid_h) * img_h
+
+                    info[f"box_{b}_conf"] = conf
+                    info[f"box_{b}_x"] = x
+                    info[f"box_{b}_y"] = y
+                    info[f"box_{b}_width"] = width
+                    info[f"box_{b}_height"] = height
+
+            if len(info) != 0:
+                decoded.append(info)

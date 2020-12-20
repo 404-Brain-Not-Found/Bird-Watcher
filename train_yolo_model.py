@@ -1,18 +1,18 @@
 from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, Flatten, Dropout
-from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Flatten, Dropout, Reshape
+from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import Sequence
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import tensorflow as tf
-from DataGenerator import DataGenerator
-from yolo_utils import YoloReshape, build_yolo_loss
+from yolo_utils import build_yolo_loss
 import os
 import random
 import numpy as np
 import cv2
 import json
 import tensorflow as tf
+
 
 def build_model(n_classes, nb_boxes=2, grid_w=7, grid_h=7, cell_w=64, cell_h=64):
 
@@ -27,7 +27,7 @@ def build_model(n_classes, nb_boxes=2, grid_w=7, grid_h=7, cell_w=64, cell_h=64)
     x = Dense(1024)(x)
     x = Dropout(0.5)(x)
     x = Dense(grid_w * grid_h * (nb_boxes * 5 + n_classes), activation='sigmoid')(x)
-    x = YoloReshape(target_shape=(grid_h, grid_w, (nb_boxes * 5 + n_classes)), n_classes=n_classes, n_boxes=nb_boxes)(x)
+    x = Reshape(target_shape=(grid_h, grid_w, n_classes + (nb_boxes * 5)))(x)
 
     model = Model(base_model.input, x)
 
@@ -44,7 +44,6 @@ class ImageSequence(Sequence):
                  image_dir,
                  annotation_dir,
                  labels,
-                 n_classes,
                  batch_size=32,
                  image_size=(448, 448),
                  grid_w=7,
@@ -56,7 +55,7 @@ class ImageSequence(Sequence):
         self.batch_size = batch_size
         self.image_size = image_size
 
-        self.n_classes = n_classes
+        self.n_classes = len(labels)
         self.grid_w = grid_w
         self.grid_h = grid_h
         self.n_boxes = n_boxes
@@ -165,9 +164,10 @@ if __name__ == "__main__":
         callbacks=[ReduceLROnPlateau()]
     )
 
-    model.save("yolo_model")
+    model.save("yolo_model", include_optimizer=False)
 
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    converter = tf.lite.TFLiteConverter.from_keras_model(load_model("yolo_model"))
+
     converter.allow_custom_ops = True
     lite_model = converter.convert()
 
