@@ -1,5 +1,6 @@
 import numpy as np
 from tensorflow.keras import backend as k
+from image_utils import non_max_suppression
 
 
 def xywh2minmax(xy, wh):
@@ -125,6 +126,7 @@ def decode_yolo_output(image, output, labels, n_boxes=2, box_conf_threshold=0.5)
             label_index = int(np.argmax(class_matrix))
 
             info = {'label': labels[label_index], "label_conf": class_matrix[label_index]}
+            boxes = []
             for b in range(n_boxes):
                 cen_x, cen_y, width, height, conf = boxes_matrix[b * 5: (b + 1) * 5]
 
@@ -135,11 +137,17 @@ def decode_yolo_output(image, output, labels, n_boxes=2, box_conf_threshold=0.5)
                     x = ((cen_x + col) / grid_w) * img_w
                     y = ((cen_y + row) / grid_h) * img_h
 
-                    info[f"box_{b}_conf"] = conf
-                    info[f"box_{b}_x"] = x
-                    info[f"box_{b}_y"] = y
-                    info[f"box_{b}_width"] = width
-                    info[f"box_{b}_height"] = height
+                    box = {"conf": conf, "xmin": x, "ymin": y, "xmax": width + x, "ymax": height + y}
+                    boxes.append(box)
 
-            if len(info) != 0:
+            if 0 < len(box):
+                box = non_max_suppression(boxes, 0.3)[0]
+                info["xmin"] = box["xmin"]
+                info["ymin"] = box["ymin"]
+                info["xmax"] = box["xmax"]
+                info["ymax"] = box["ymax"]
+
+            if len(info) > 2:
                 decoded.append(info)
+
+    return decoded

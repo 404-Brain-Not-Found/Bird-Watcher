@@ -6,11 +6,13 @@ except ModuleNotFoundError:
 import cv2
 import numpy as np
 import itertools
+from yolo_utils import decode_yolo_output
 
-interpreter = tflite.Interpreter("lite-bird-classifier.tflite")
-interpreter.allocate_tensors()
 
+classifier_inter = None
 ss = cv2.ximgproc.segmentation.createSelectiveSearchSegmentation()
+
+yolo_inter = None
 
 with open("labels.txt", "r") as f:
     labels = f.read().split("\n")
@@ -18,9 +20,14 @@ with open("labels.txt", "r") as f:
 
 def rcnn_detection(image, min_conf=0.9, overlap_threshold=0.3):
     assert min_conf < 1.0
+    global classifier_inter
 
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
+    if classifier_inter is None:
+        classifier_inter = tflite.Interpreter("lite-bird-classifier.tflite")
+        classifier_inter.allocate_tensors()
+
+    input_details = classifier_inter.get_input_details()
+    output_details = classifier_inter.get_output_details()
 
     ss.setBaseImage(image)
     ss.switchToSelectiveSearchFast()
@@ -35,10 +42,10 @@ def rcnn_detection(image, min_conf=0.9, overlap_threshold=0.3):
             resized = np.float32(resized)
             img = np.expand_dims(resized, axis=0)
 
-            interpreter.set_tensor(input_details[0]["index"], img)
-            interpreter.invoke()
+            classifier_inter.set_tensor(input_details[0]["index"], img)
+            classifier_inter.invoke()
 
-            output_data = interpreter.get_tensor(output_details[0]['index'])
+            output_data = classifier_inter.get_tensor(output_details[0]['index'])
             output = np.squeeze(output_data)
             max_index = int(np.argmax(output))
 
@@ -65,51 +72,29 @@ def rcnn_detection(image, min_conf=0.9, overlap_threshold=0.3):
     return filter_finds
 
 
-def non_max_suppression(boxes, threshold):
+def yolo_detection(image, min_conf=0.9, overlap_threshold=0.3):
+    assert min_conf < 1.0
 
-    if len(boxes) == 0:
-        print("No boxes")
-        return []
+    global yolo_inter
 
-    pick = []
+    if yolo_inter is None:
+        yolo_inter = tflite.Interpreter("lite-bird-classifier.tflite")
+        yolo_inter.allocate_tensors()
 
-    x1 = []
-    y1 = []
-    x2 = []
-    y2 = []
+    input_details = yolo_inter.get_input_details()
+    output_details = yolo_inter.get_output_details()
 
-    for box in boxes:
-        x1 .append(box["xmin"])
-        y1.append(box["ymin"])
-        x2.append(box["xmax"])
-        y2.append(box["ymax"])
+    image = np.float32(cv2.resize(image, (448, 448))) / 255
 
-    x1 = np.array(x1, dtype=np.float32)
-    x2 = np.array(x2, dtype=np.float32)
-    y1 = np.array(y1, dtype=np.float32)
-    y2 = np.array(y2, dtype=np.float32)
+    image = np.expand_dims(image, axis=0)
 
-    area = (x2 - x1 + 1) * (y2 - y1 + 1)
-    idxs = np.argsort(y2)
+    yolo_inter.set_tensor(input_details[0]["index"], image)
+    yolo_inter.invoke()
 
-    while 0 < len(idxs):
-        last = len(idxs) - 1
-        i = idxs[last]
-        pick.append(i)
+    output_data = yolo_inter.get_tensor(output_details[0]['index'])
+    output = np.squeeze(output_data)
 
-        xx1 = np.maximum(x1[i], x1[idxs[:last]])
-        yy1 = np.maximum(y1[i], y1[idxs[:last]])
-        xx2 = np.minimum(x2[i], x2[idxs[:last]])
-        yy2 = np.minimum(y2[i], y2[idxs[:last]])
-
-        w = np.maximum(0, xx2 - xx1 + 1)
-        h = np.maximum(0, yy2 - yy1 + 1)
-
-        overlap = (w * h) / area[idxs[:last]]
-
-        idxs = np.delete(idxs, np.concatenate(([last], np.where(overlap > threshold)[0])))
-
-    return [boxes[i] for i in pick]
+    return decode_yolo_output(image, output, labels)
 
 
 def draw_bounding_boxes(image, boxes):
